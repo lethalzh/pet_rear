@@ -5,7 +5,6 @@ const sd = require('silly-datetime');
 
 
 router.post('/productList',(req,res)=>{
-	
 	let flag = req.body.flag
 	let orderBy=''
 	if(flag==1)
@@ -14,17 +13,17 @@ router.post('/productList',(req,res)=>{
 		orderBy='order by com_price'
 	let page = 	req.body.page
 	let num = 12
-	let pageStr=` limit ${(page-1)*num},${page*num}`
-	let searArr = req.body.search.split(' ');
+	let pageStr=` limit ${(page-1)*num},${num}`
+	let searArr = req.body.search.split('+');
 	let animal = req.headers.animal;
 	let str=''
 	for(let i of searArr){
-		 str += ` com_name like '%${i}%' or com_product_type like '%${i}%' or com_product_types like '%${i}%' or com_brand like '%${i}%' or`
+		 str += ` (com_name like '%${i}%' or com_product_type like '%${i}%' or com_product_types like '%${i}%' or com_brand like '%${i}%') and`
 	}
-	str = str.substr(0,str.length-2)
+	str = str.substr(0,str.length-3)
 	let sqlCount = `select count(*) as total from commodity where com_animal='${animal}' and (${str}) ${orderBy}`
 	let sqlAll = `select * from commodity where com_animal='${animal}' and (${str}) ${orderBy}${pageStr}`
-	  // console.log(sqlAll,'----------')
+	//console.log(sqlAll,'sqlall')
 	con.query(sqlCount,(err,result)=>{
 		if(err){
 			res.send({msg:'failure'})
@@ -33,8 +32,16 @@ router.post('/productList',(req,res)=>{
 				if(err){
 					res.send({msg:'failure'})
 				}else{
-					 // console.log(result,re,'resultresultresultresultresult')
-					res.send({total:result[0].total,data:re,msg:'success'})
+					let sArr=[]
+					for(let i  of re){
+						let arr = i.com_name.split(' ')
+						i.com_brand=arr[0].replace(/\s*【.*?】/g,'')
+						sArr.push(arr[0].replace(/\s*【.*?\】/g,''))
+						// console.log(i.com_brand,'---------------------------')
+					}
+				
+					 // console.log(re,'resultresultresultresultresult',[...new Set(sArr)] )
+					res.send({total:result[0].total,data:re,msg:'success',brands:[...new Set(sArr)]})
 				}
 			})
 			
@@ -58,21 +65,36 @@ router.get('/:pid',(req,res)=>{
 })
 router.post('/cart',(req,res)=>{
 	let uid = req.body.id;
-	let sql = `SELECT s_id,com_price,com_name,com_imgs,shoppcart.s_num 
+	let sql = `SELECT shoppcart.c_id,s_id,com_oldprice,com_price,com_num,com_name,com_imgs,shoppcart.s_num 
 	FROM commodity,	shoppcart 
-	WHERE	shoppcart.c_id = commodity.com_id AND shoppcart.u_id=${uid}`
+	WHERE	(shoppcart.c_id = commodity.com_id AND shoppcart.u_id=${uid})`
+	
 	// console.log(sql,'---------------------')
 	con.query(sql,(err,result)=>{
 		if(err){
 			res.send({msg:'failure'})
 		}else{
-			var arr = [];
-		
+			var arr = [];		
 			for(let em of result){
 				arr.push(em)
 			}
 			res.send({data:arr,msg:'success'})
 		}
+	})
+	
+})
+
+router.get('/getcart/:oid',(req,res)=>{
+	let oid = req.params.oid
+	let sql = `select * from ordercom where o_id = ${oid}`
+	con.query(sql,(err,result)=>{
+		if(err){
+			res.send({msg:'failure',data:''})
+		}else{
+			console.log(result,'getcart')
+			res.send({msg:'success',data:result})
+		}
+		
 	})
 	
 })
@@ -120,17 +142,20 @@ router.post('/settlement',(req,res)=>{
 	let time= sd.format(new Date(), 'YYYY-MM-DD HH:mm:ss');
 	let commodity = req.body.commodity
 	let totalPrice = req.body.totalPrice
+	let deli = req.body.deli
 	let id = req.body.id
+	let aid = req.body.add_id
 	let oid = updatetimes
+	let status=req.body.status
 	// console.log(commodity,totalPrice,id,'------------------------',updatetimes)
-	let sqlInsert = `INSERT into orderGrop (o_id,u_id,o_createDate,o_status,o_totalPrice) VALUES ('${oid}',${id},'${time}','start',${totalPrice})`
+	let sqlInsert = `INSERT into orderGrop (o_id,u_id,a_id,o_createDate,o_status,o_totalPrice,o_deli) VALUES ('${oid}',${id},${aid},'${time}',${status},${totalPrice},'${deli}')`
 	console.log(sqlInsert,'sqlInsert----------')
 	 con.query(sqlInsert,(err,result)=>{
 		 if(err){
 			res.send({msg:'failure'})
 		 }else{
 			for(let it of commodity){
-				let sql = `INSERT into ordercom (o_id,u_id,com_name,com_num,com_price) VALUES ('${oid}',${id},'${it.com_name}',${it.s_num},${it.com_price})`
+				let sql = `INSERT into ordercom (c_id,o_id,u_id,com_name,s_num,com_price,com_imgs,com_oldprice) VALUES ('${it.c_id}','${oid}',${id},'${it.com_name}',${it.s_num},${it.com_price},'${it.com_imgs}',${it.com_oldprice})`
 				console.log(sql,'sql----------')
 				con.query(sql,(er,re)=>{
 					if(er) res.send({msg:'failure'})
@@ -142,4 +167,31 @@ router.post('/settlement',(req,res)=>{
 
 	
 })
+
+router.post('/setOrder',(req,res)=>{
+	let oid=req.body.oid;
+	let time= sd.format(new Date(), 'YYYY-MM-DD HH:mm:ss');
+	let sql = `update ordergrop set o_finishDate='${time}',o_status=3 where o_id='${oid}'`
+	con.query(sql,(err,result)=>{
+		if(err){
+			res.send({msg:'failure'})
+		}else{
+			res.send({msg:'success'})
+		}
+	})
+	
+})
+
+router.post('/getHotList',(req,res)=>{
+	let animal=req.headers.animal;
+	let sql = `SELECT * FROM commodity WHERE com_animal = '${animal}' ORDER BY	com_msales desc LIMIT 6`
+	con.query(sql,(err,result)=>{
+		if(err){
+			res.send({msg:'failure'})
+		}else{
+			res.send({msg:'success',data:result})
+		}
+	})
+})
+
 module.exports = router;
